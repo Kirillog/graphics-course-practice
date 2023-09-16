@@ -1,3 +1,6 @@
+#include <SDL2/SDL_events.h>
+#include <SDL2/SDL_scancode.h>
+#include <SDL2/SDL_video.h>
 #ifdef WIN32
 #include <SDL.h>
 #undef main
@@ -7,6 +10,7 @@
 
 #include <GL/glew.h>
 
+#include <unordered_map>
 #include <string_view>
 #include <stdexcept>
 #include <iostream>
@@ -30,24 +34,37 @@ void glew_fail(std::string_view message, GLenum error)
 const char vertex_shader_source[] =
 R"(#version 330 core
 
-const vec2 VERTICES[3] = vec2[3](
+const vec2 VERTICES[8] = vec2[8](
+    vec2(0.0, 0.0),
     vec2(0.0, 1.0),
+    vec2(-sqrt(0.75), 0.5),
     vec2(-sqrt(0.75), -0.5),
-    vec2( sqrt(0.75), -0.5)
+    vec2(0.0, -1.0),
+    vec2( sqrt(0.75), -0.5),
+    vec2( sqrt(0.75), 0.5),
+    vec2(0.0, 1.0)
 );
 
-const vec3 COLORS[3] = vec3[3](
+const vec3 COLORS[8] = vec3[8](
+    vec3(0.5, 0.5, 0.5),
     vec3(1.0, 0.0, 0.0),
     vec3(0.0, 1.0, 0.0),
-    vec3(0.0, 0.0, 1.0)
+    vec3(0.0, 0.0, 1.0),
+    vec3(1.0, 0.0, 1.0),
+    vec3(0.0, 1.0, 1.0),
+    vec3(1.0, 1.0, 0.0),
+    vec3(1.0, 0.0, 0.0)
 );
+
+uniform mat4 transform;
+uniform mat4 view;
 
 out vec3 color;
 
 void main()
 {
     vec2 position = VERTICES[gl_VertexID];
-    gl_Position = vec4(position, 0.0, 1.0);
+    gl_Position = view * transform * vec4(position, 0.0, 1.0);
     color = COLORS[gl_VertexID];
 }
 )";
@@ -136,6 +153,8 @@ int main() try
     if (!GLEW_VERSION_3_3)
         throw std::runtime_error("OpenGL 3.3 is not supported");
 
+    // SDL_GL_SetSwapInterval(0);
+
     glClearColor(0.8f, 0.8f, 1.f, 0.f);
 
     GLuint vertex_shader = create_shader(GL_VERTEX_SHADER, vertex_shader_source);
@@ -143,16 +162,50 @@ int main() try
 
     GLuint program = create_program(vertex_shader, fragment_shader);
 
+    float aspect_ratio = width * 1.f / height;
+    const GLfloat view[16] = {
+        1 / aspect_ratio, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1
+    };
+
+    glUseProgram(program);
+    GLint view_var = glGetUniformLocation(program, "view");
+    glUniformMatrix4fv(view_var, 1, GL_FALSE, view);
+
     GLuint vao;
     glGenVertexArrays(1, &vao);
 
     auto last_frame_start = std::chrono::high_resolution_clock::now();
 
+    std::unordered_map<SDL_Scancode, std::pair<int, int>> key_down = {
+        {SDL_SCANCODE_LEFT, {1, 0}},
+        {SDL_SCANCODE_RIGHT, {-1, 0}},
+        {SDL_SCANCODE_UP, {0, -1}},
+        {SDL_SCANCODE_DOWN, {0, 1}}
+    };
+
+    float time = 0.f;
+    float d_angle = 0, angle = 0, d_rad = 0, rad = 0;
+    float dt = 0;
     bool running = true;
     while (running)
     {
         for (SDL_Event event; SDL_PollEvent(&event);) switch (event.type)
         {
+        case SDL_KEYDOWN:{
+            auto delta = key_down[event.key.keysym.scancode];
+            d_angle = delta.first;
+            d_rad = delta.second;
+            break;
+        }
+        case SDL_KEYUP: {
+            auto delta = key_down[event.key.keysym.scancode];
+            d_angle = 0;
+            d_rad = 0;
+            break;
+        }
         case SDL_QUIT:
             running = false;
             break;
@@ -171,14 +224,29 @@ int main() try
             break;
 
         auto now = std::chrono::high_resolution_clock::now();
-        float dt = std::chrono::duration_cast<std::chrono::duration<float>>(now - last_frame_start).count();
+        dt = std::chrono::duration_cast<std::chrono::duration<float>>(now - last_frame_start).count();
         last_frame_start = now;
+        time += dt;
+        // std::cout << dt << "\n";
 
         glClear(GL_COLOR_BUFFER_BIT);
 
         glUseProgram(program);
+        GLint transform_var = glGetUniformLocation(program, "transform");
+        angle += d_angle * dt;
+        rad += d_rad * dt;
+        float x = rad * cos(angle);
+        float y = rad * sin(angle);
+        float scale = 0.5;
+        const GLfloat rotate_matrix[16] = {
+            scale * cos(angle), -scale * sin(angle), 0, x,
+            scale * sin(angle), scale * cos(angle), 0, y,
+            0, 0, 1, 0,
+            0, 0, 0, 1
+        };
+        glUniformMatrix4fv(transform_var, 1, GL_TRUE, rotate_matrix);
         glBindVertexArray(vao);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glDrawArrays(GL_TRIANGLE_FAN, 0, 8);
 
         SDL_GL_SwapWindow(window);
     }
