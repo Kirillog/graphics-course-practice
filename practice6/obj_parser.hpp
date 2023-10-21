@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <array>
 #include <filesystem>
 
 struct obj_data
