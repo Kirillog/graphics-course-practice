@@ -9,25 +9,25 @@
 
 #include <GL/glew.h>
 
-#include <string_view>
-#include <stdexcept>
-#include <iostream>
 #include <chrono>
-#include <vector>
-#include <map>
 #include <cmath>
 #include <fstream>
+#include <iostream>
+#include <map>
 #include <sstream>
+#include <stdexcept>
+#include <string_view>
+#include <vector>
 
 #define GLM_FORCE_SWIZZLE
 #define GLM_ENABLE_EXPERIMENTAL
 
-#include <glm/vec3.hpp>
-#include <glm/mat4x4.hpp>
-#include <glm/ext/matrix_transform.hpp>
 #include <glm/ext/matrix_clip_space.hpp>
+#include <glm/ext/matrix_transform.hpp>
 #include <glm/ext/scalar_constants.hpp>
 #include <glm/gtx/string_cast.hpp>
+#include <glm/mat4x4.hpp>
+#include <glm/vec3.hpp>
 
 #include "obj_parser.hpp"
 
@@ -40,11 +40,13 @@ void sdl2_fail(std::string_view message) {
 }
 
 void glew_fail(std::string_view message, GLenum error) {
-    throw std::runtime_error(to_string(message) + reinterpret_cast<const char *>(glewGetErrorString(error)));
+    throw std::runtime_error(
+        to_string(message) +
+        reinterpret_cast<const char *>(glewGetErrorString(error)));
 }
 
 const char vertex_shader_source[] =
-        R"(#version 330 core
+    R"(#version 330 core
 
 uniform mat4 model;
 uniform mat4 view;
@@ -65,24 +67,49 @@ void main()
 )";
 
 const char fragment_shader_source[] =
-        R"(#version 330 core
+    R"(#version 330 core
 
 uniform vec3 camera_position;
 
 uniform vec3 albedo;
-
 uniform vec3 ambient_light;
+
+uniform vec3 sun_direction;
+uniform vec3 sun_color;
+
+uniform vec3 point_light_position;
+uniform vec3 point_light_color;
+uniform vec3 point_light_attenuation;
+
+uniform float glossiness;
+uniform float roughness;
 
 in vec3 position;
 in vec3 normal;
 
 layout (location = 0) out vec4 out_color;
 
+vec3 diffuse(vec3 direction) {
+    vec3 norm_dir = direction / length(direction);
+    return albedo * max(0.0, dot(normal, norm_dir));
+}
+
+vec3 specular(vec3 direction) {
+    float power = 1.0 / (roughness * roughness) - 1;
+    vec3 light_direction = direction / length(direction);
+    vec3 reflected = 2.0 * normal * dot(normal, light_direction) - light_direction;
+    vec3 view_direction = camera_position - position;
+    return glossiness * albedo * pow(max(0.0, dot(reflected, view_direction / length(view_direction))), power);
+}
+
 void main()
 {
     vec3 ambient = albedo * ambient_light;
-    vec3 color = ambient;
-    out_color = vec4(color, 1.0);
+    vec3 point_light_direction = point_light_position - position;
+    float point_light_dist = length(point_light_direction);
+    float attenuation_coef = 1.0 / (point_light_attenuation.x + point_light_dist * point_light_attenuation.y + point_light_dist * point_light_dist * point_light_attenuation.z);
+    vec3 color = ambient + (diffuse(sun_direction) + specular(sun_direction)) * sun_color + (diffuse(point_light_direction) + specular(point_light_direction)) * point_light_color * attenuation_coef;
+    out_color = vec4(color, 0.5);
 }
 )";
 
@@ -127,18 +154,18 @@ int main() try {
 
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
+                        SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 
-    SDL_Window *window = SDL_CreateWindow("Graphics course practice 7",
-                                          SDL_WINDOWPOS_CENTERED,
-                                          SDL_WINDOWPOS_CENTERED,
-                                          800, 600,
-                                          SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED);
+    SDL_Window *window = SDL_CreateWindow(
+        "Graphics course practice 7", SDL_WINDOWPOS_CENTERED,
+        SDL_WINDOWPOS_CENTERED, 800, 600,
+        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED);
 
     if (!window)
         sdl2_fail("SDL_CreateWindow: ");
@@ -159,15 +186,29 @@ int main() try {
     glClearColor(0.8f, 0.8f, 1.f, 0.f);
 
     auto vertex_shader = create_shader(GL_VERTEX_SHADER, vertex_shader_source);
-    auto fragment_shader = create_shader(GL_FRAGMENT_SHADER, fragment_shader_source);
+    auto fragment_shader =
+        create_shader(GL_FRAGMENT_SHADER, fragment_shader_source);
     auto program = create_program(vertex_shader, fragment_shader);
 
     GLuint model_location = glGetUniformLocation(program, "model");
     GLuint view_location = glGetUniformLocation(program, "view");
     GLuint projection_location = glGetUniformLocation(program, "projection");
-    GLuint camera_position_location = glGetUniformLocation(program, "camera_position");
+    GLuint camera_position_location =
+        glGetUniformLocation(program, "camera_position");
     GLuint albedo_location = glGetUniformLocation(program, "albedo");
-    GLuint ambient_light_location = glGetUniformLocation(program, "ambient_light");
+    GLuint ambient_light_location =
+        glGetUniformLocation(program, "ambient_light");
+    GLuint sun_direction_location =
+        glGetUniformLocation(program, "sun_direction");
+    GLuint sun_color_location = glGetUniformLocation(program, "sun_color");
+    GLuint point_light_position_location =
+        glGetUniformLocation(program, "point_light_position");
+    GLuint point_light_color_location =
+        glGetUniformLocation(program, "point_light_color");
+    GLuint point_light_attenuation_location =
+        glGetUniformLocation(program, "point_light_attenuation");
+    GLuint roughness_location = glGetUniformLocation(program, "roughness");
+    GLuint glossiness_location = glGetUniformLocation(program, "glossiness");
 
     std::string project_root = PROJECT_ROOT;
     std::string suzanne_model_path = project_root + "/suzanne.obj";
@@ -179,24 +220,34 @@ int main() try {
 
     glGenBuffers(1, &suzanne_vbo);
     glBindBuffer(GL_ARRAY_BUFFER, suzanne_vbo);
-    glBufferData(GL_ARRAY_BUFFER, suzanne.vertices.size() * sizeof(suzanne.vertices[0]), suzanne.vertices.data(),
-                 GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER,
+                 suzanne.vertices.size() * sizeof(suzanne.vertices[0]),
+                 suzanne.vertices.data(), GL_STATIC_DRAW);
 
     glGenBuffers(1, &suzanne_ebo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, suzanne_ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, suzanne.indices.size() * sizeof(suzanne.indices[0]), suzanne.indices.data(),
-                 GL_STATIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                 suzanne.indices.size() * sizeof(suzanne.indices[0]),
+                 suzanne.indices.data(), GL_STATIC_DRAW);
 
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(obj_data::vertex), (void *) (0));
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(obj_data::vertex),
+                          (void *) (0));
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(obj_data::vertex), (void *) (12));
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(obj_data::vertex),
+                          (void *) (12));
 
     auto last_frame_start = std::chrono::high_resolution_clock::now();
 
     float time = 0.f;
 
     std::map<SDL_Keycode, bool> button_down;
+
+    float shift = 4.f;
+    std::vector<glm::vec3> shifts = {
+        {-shift, -shift, 0.0f}, {0.0f, -shift, 0.0f}, {shift, -shift, 0.0f},
+        {-shift, 0.0f, 0.0f},  {0.0f, 0.0f, 0.0f},  {shift, 0.0f, 0.0f},
+        {-shift, shift, 0.0f},  {0.0f, shift, 0.0f},  {shift, shift, 0.0f}};
 
     bool transparent = false;
 
@@ -208,32 +259,34 @@ int main() try {
     while (running) {
         for (SDL_Event event; SDL_PollEvent(&event);)
             switch (event.type) {
-                case SDL_QUIT:
-                    running = false;
+            case SDL_QUIT:
+                running = false;
+                break;
+            case SDL_WINDOWEVENT:
+                switch (event.window.event) {
+                case SDL_WINDOWEVENT_RESIZED:
+                    width = event.window.data1;
+                    height = event.window.data2;
                     break;
-                case SDL_WINDOWEVENT:
-                    switch (event.window.event) {
-                        case SDL_WINDOWEVENT_RESIZED:
-                            width = event.window.data1;
-                            height = event.window.data2;
-                            break;
-                    }
-                    break;
-                case SDL_KEYDOWN:
-                    button_down[event.key.keysym.sym] = true;
-                    if (event.key.keysym.sym == SDLK_SPACE)
-                        transparent = !transparent;
-                    break;
-                case SDL_KEYUP:
-                    button_down[event.key.keysym.sym] = false;
-                    break;
+                }
+                break;
+            case SDL_KEYDOWN:
+                button_down[event.key.keysym.sym] = true;
+                if (event.key.keysym.sym == SDLK_SPACE)
+                    transparent = !transparent;
+                break;
+            case SDL_KEYUP:
+                button_down[event.key.keysym.sym] = false;
+                break;
             }
 
         if (!running)
             break;
 
         auto now = std::chrono::high_resolution_clock::now();
-        float dt = std::chrono::duration_cast<std::chrono::duration<float>>(now - last_frame_start).count();
+        float dt = std::chrono::duration_cast<std::chrono::duration<float>>(
+                       now - last_frame_start)
+                       .count();
         last_frame_start = now;
         time += dt;
 
@@ -256,6 +309,14 @@ int main() try {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glClearColor(0.8f, 0.8f, 1.f, 0.f);
 
+        if (transparent) {
+            glEnable(GL_BLEND);
+            glBlendEquation(GL_FUNC_ADD);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        } else {
+            glDisable(GL_BLEND);
+        }
+
         glEnable(GL_DEPTH_TEST);
         glEnable(GL_CULL_FACE);
 
@@ -269,29 +330,47 @@ int main() try {
         view = glm::rotate(view, camera_angle, {0.f, 1.f, 0.f});
         view = glm::translate(view, {-camera_x, 0.f, 0.f});
 
-        float aspect = (float)height / (float)width;
-        glm::mat4 projection = glm::perspective(glm::pi<float>() / 3.f, (width * 1.f) / height, near, far);
+        float aspect = (float) height / (float) width;
+        glm::mat4 projection = glm::perspective(
+            glm::pi<float>() / 3.f, (width * 1.f) / height, near, far);
 
-        glm::vec3 camera_position = (glm::inverse(view) * glm::vec4(0.f, 0.f, 0.f, 1.f)).xyz();
+        glm::vec3 camera_position =
+            (glm::inverse(view) * glm::vec4(0.f, 0.f, 0.f, 1.f)).xyz();
 
         glUseProgram(program);
-        glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
-        glUniformMatrix4fv(view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
-        glUniformMatrix4fv(projection_location, 1, GL_FALSE, reinterpret_cast<float *>(&projection));
+
+        glUniformMatrix4fv(view_location, 1, GL_FALSE,
+                           reinterpret_cast<float *>(&view));
+        glUniformMatrix4fv(projection_location, 1, GL_FALSE,
+                           reinterpret_cast<float *>(&projection));
         glUniform3fv(camera_position_location, 1, (float *) (&camera_position));
         glUniform3f(albedo_location, 0.7f, 0.4f, 0.2f);
         glUniform3f(ambient_light_location, 0.2f, 0.2f, 0.2f);
+        glUniform3f(sun_color_location, 1.0f, 0.9f, 0.8f);
+        glUniform3f(sun_direction_location, 0.0f, 0.1f, 1.0f);
+        glUniform3f(point_light_color_location, 0.f, 1.f, 0.f);
+        glUniform3f(point_light_position_location, 2 * cos(time), 0.f,
+                    2 * sin(time));
+        glUniform3f(point_light_attenuation_location, 1.0f, 0.0f, 0.01f);
 
         glBindVertexArray(suzanne_vao);
-        glDrawElements(GL_TRIANGLES, suzanne.indices.size(), GL_UNSIGNED_INT, nullptr);
+        for (int i = 0; i < shifts.size(); ++i) {
+            glm::mat4 translated_model = glm::translate(model, shifts[i]);
+            glUniformMatrix4fv(model_location, 1, GL_FALSE,
+                               reinterpret_cast<float *>(&translated_model));
+            glUniform1f(glossiness_location, static_cast<float>(i + 1));
+            glUniform1f(roughness_location,
+                    0.1f + 0.4f * (i + 1) / shifts.size());
+            glDrawElements(GL_TRIANGLES, suzanne.indices.size(), GL_UNSIGNED_INT,
+                       nullptr);
+        }
 
         SDL_GL_SwapWindow(window);
     }
 
     SDL_GL_DeleteContext(gl_context);
     SDL_DestroyWindow(window);
-}
-catch (std::exception const &e) {
+} catch (std::exception const &e) {
     std::cerr << e.what() << std::endl;
     return EXIT_FAILURE;
 }
