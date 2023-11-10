@@ -3,8 +3,8 @@
 obj_data parse_obj(std::filesystem::path const &path) {
     std::string inputfile = path.string();
     tinyobj::ObjReaderConfig reader_config;
-    reader_config.mtl_search_path =
-        std::string(PROJECT_ROOT) + MODEL_DIR;   // Path to material files
+    reader_config.mtl_search_path = path.parent_path();
+       // Path to material files
 
     tinyobj::ObjReader reader;
 
